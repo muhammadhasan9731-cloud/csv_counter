@@ -44,7 +44,7 @@ def to_int_str(val):
     except (ValueError, TypeError):
         return str(val).strip()
 
-# ─── Read Dataframes Helper ───────────────────────────────────────────────────
+# ─── Read Dataframes Helper (Fixed to Match Standalone Exactly) ───────────────
 
 def load_file(uploaded_file, is_tracking=False, sheet_name=None):
     if uploaded_file.name.endswith(".xlsx"):
@@ -102,10 +102,15 @@ if tracking_file and reference_file:
         # Check tracking file required headers
         dst_col = next((c for c in tracking_df.columns if c.lower() == "destination"), None)
         src_col = next((c for c in tracking_df.columns if c.lower() == "source"), None)
+        text_col = next((c for c in tracking_df.columns if c.lower() in ["text", "message"]), None) 
         
         if not dst_col or not src_col:
             st.error("❌ Tracking file must contain both 'Destination' and 'Source' columns.")
         else:
+            # =====================================================================
+            # TABLE 1: ORIGINAL LOGIC (Unchanged)
+            # =====================================================================
+            st.subheader("1. Source Analysis Matrix")
             # Normalize target columns using your exact business logic
             tracking_df['_dest_norm'] = tracking_df[dst_col].apply(to_int_str)
             tracking_df['_source'] = tracking_df[src_col].astype(str).str.strip()
@@ -134,9 +139,6 @@ if tracking_file and reference_file:
             st.table(clean_df)
             
             # ── Export System ─────────────────────────────────────────────────
-            st.divider()
-            
-            # Reset index so 'Operator' is preserved during standard CSV export conversion
             export_ready = clean_df.reset_index()
             export_ready.insert(0, "File/Name", person_name)
             
@@ -145,8 +147,64 @@ if tracking_file and reference_file:
                 data=export_ready.to_csv(index=False).encode("utf-8"),
                 file_name=f"{person_name.lower()}_operator_source_matrix.csv",
                 mime="text/csv",
-                use_container_width=True
+                use_container_width=True,
+                key="download_source" 
             )
+            
+            # =====================================================================
+            # TABLE 2: TEXT STRING SEARCH
+            # =====================================================================
+            st.divider()
+            st.subheader("2. Text Search Matrix")
+            
+            search_input = st.text_input(
+                "Enter strings to search in the Text column (comma-separated):", 
+                value="apple, microsoft, amazon"
+            )
+            
+            app_strings = [s.strip() for s in search_input.split(",") if s.strip()]
+            
+            if app_strings:
+                if not text_col:
+                    st.warning("⚠️ Could not find a 'Text' or 'Message' column in the tracking file to perform the search.")
+                else:
+                    tracking_df['_text'] = tracking_df[text_col].astype(str)
+                    
+                    rows_text = []
+                    for operator in operators:
+                        numbers_set = set(reference_df[operator].dropna().apply(to_int_str))
+                        matched = tracking_df[tracking_df['_dest_norm'].isin(numbers_set)]
+                        
+                        row = {'Operator': operator}
+                        total_occurrences = 0
+                        
+                        for app_text in app_strings:
+                            occurrences = matched['_text'].str.contains(app_text, case=False, na=False).sum()
+                            row[app_text] = occurrences
+                            total_occurrences += occurrences
+                            
+                        row['Total'] = total_occurrences
+                        rows_text.append(row)
+                    
+                    result_text_df = pd.DataFrame(rows_text).set_index('Operator')
+                    
+                    # Reorder keeping 'Total' first
+                    column_order = ['Total'] + app_strings
+                    clean_text_df = result_text_df[column_order].sort_values('Total', ascending=False)
+                    
+                    st.table(clean_text_df)
+                    
+                    export_ready_text = clean_text_df.reset_index()
+                    export_ready_text.insert(0, "File/Name", person_name)
+                    
+                    st.download_button(
+                        label=f"Export {person_name} Text Search Report",
+                        data=export_ready_text.to_csv(index=False).encode("utf-8"),
+                        file_name=f"{person_name.lower()}_text_search_matrix.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key="download_text" 
+                    )
             
     except Exception as e:
         st.error(f"An error occurred while analyzing the files: {e}")
