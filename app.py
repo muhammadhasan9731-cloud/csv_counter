@@ -62,13 +62,30 @@ def load_file(uploaded_file, is_tracking=False, sheet_name=None):
     else:
         raw_text = raw_bytes.decode("utf-8", errors="replace")
 
-    if is_tracking:
-        lines = [line for line in raw_text.splitlines() if not line.strip().startswith("#")]
-        clean_text = "\n".join(lines)
-    else:
-        lines = raw_text.splitlines()
-        clean_text = raw_text
+    all_lines = raw_text.splitlines()
 
+    if is_tracking:
+        # Find the actual header line by locating the line that contains
+        # both 'destination' and 'source' (case-insensitive). Everything
+        # before that line is treated as metadata/comments.
+        header_idx = None
+        for i, line in enumerate(all_lines):
+            low = line.lower()
+            if "destination" in low and "source" in low:
+                header_idx = i
+                break
+
+        if header_idx is not None:
+            lines = [l for l in all_lines[header_idx:] if l.strip()]
+        else:
+            # Fallback: strip comment and empty lines
+            lines = [l for l in all_lines if l.strip() and not l.strip().startswith("#")]
+    else:
+        lines = [l for l in all_lines if l.strip() and not l.strip().startswith("#")]
+
+    clean_text = "\n".join(lines)
+
+        
     header_line = lines[0] if lines else ""
     delimiter = ","
     for sep in (",", ";", "\t", "|"):
